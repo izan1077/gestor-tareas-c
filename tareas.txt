@@ -1,0 +1,3 @@
+0,Instalar Linux en el PC viejo
+1,Configurar Git y SSH en el Mac
+0,Aprender a usar Makefiles
