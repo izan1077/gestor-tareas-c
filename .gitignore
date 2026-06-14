@@ -1,0 +1,9 @@
+# Ignorar el ejecutable compilado en Mac
+gestor
+
+# Ignorar archivos de base de datos locales
+*.db
+
+# Ignorar carpetas ocultas del sistema y del editor
+.DS_Store
+.vscode/

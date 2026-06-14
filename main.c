@@ -1,139 +1,139 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sqlite3.h> // <-- La nueva librería mágica
 
-#define MAX_TAREAS 100
-#define MAX_TEXTO 100
+// Función auxiliar para inicializar la base de datos y crear la tabla si no existe
+void inicializar_db() {
+    sqlite3 *db;
+    char *err_msg = 0;
+    
+    // Abre (o crea) el archivo de la base de datos
+    int rc = sqlite3_open("tareas.db", &db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "No se pudo abrir la base de datos: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        exit(1);
+    }
 
-typedef struct {
-    char descripcion[MAX_TEXTO];
-    int completada;
-} Tarea;
+    // Código SQL para crear la tabla
+    char *sql = "CREATE TABLE IF NOT EXISTS tareas("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "descripcion TEXT NOT NULL,"
+                "completada INTEGER DEFAULT 0);";
 
+    rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Error de SQL: %s\n", err_msg);
+        sqlite3_free(err_msg);
+    }
+
+    sqlite3_close(db);
+}
+
+// Función para mostrar las tareas ejecutando un SELECT
 void mostrar_tareas() {
-    Tarea lista[MAX_TAREAS];
-    int total_tareas = 0;
-
-    FILE *archivo = fopen("tareas.txt", "r");
-    if (archivo == NULL) {
-        printf("\n[i] No hay tareas guardadas aún.\n");
+    sqlite3 *db;
+    sqlite3_stmt *res;
+    
+    sqlite3_open("tareas.db", &db);
+    
+    char *sql = "SELECT id, descripcion, completada FROM tareas;";
+    
+    // Preparamos la consulta SQL
+    int rc = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Error al consultar: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
         return;
     }
 
-    while (fscanf(archivo, "%d,%[^\n]\n", &lista[total_tareas].completada, lista[total_tareas].descripcion) != EOF) {
-        total_tareas++;
-        if (total_tareas >= MAX_TAREAS) break;
+    printf("\n=== MI LISTA DE TAREAS (SQL) ===\n");
+    // Recorremos los resultados fila por fila
+    while (sqlite3_step(res) == SQLITE_ROW) {
+        int id = sqlite3_column_int(res, 0);
+        const unsigned char *desc = sqlite3_column_text(res, 1);
+        int comp = sqlite3_column_int(res, 2);
+        
+        printf("[%d] %s %s\n", id, comp ? "[X]" : "[ ]", desc);
     }
-    fclose(archivo);
+    printf("=================================\n");
 
-    printf("\n=== MI LISTA DE TAREAS ===\n");
-    for (int i = 0; i < total_tareas; i++) {
-        // Añadimos el número de índice (i + 1) para que el usuario pueda elegirla
-        printf("%d. %s %s\n", i + 1, lista[i].completada ? "[X]" : "[ ]", lista[i].descripcion);
-    }
-    printf("==========================\n");
+    sqlite3_finalize(res);
+    sqlite3_close(db);
 }
 
+// Función para añadir una tarea usando INSERT
 void añadir_tarea() {
-    char nueva_descripcion[MAX_TEXTO];
+    sqlite3 *db;
+    sqlite3_stmt *res;
+    char nueva_descripcion[100];
     
     printf("\nEscribe la nueva tarea: ");
     getchar(); 
-    fgets(nueva_descripcion, MAX_TEXTO, stdin);
+    fgets(nueva_descripcion, 100, stdin);
     nueva_descripcion[strcspn(nueva_descripcion, "\n")] = 0;
 
-    FILE *archivo = fopen("tareas.txt", "a");
-    if (archivo == NULL) {
-        printf("Error al abrir el archivo.\n");
-        return;
-    }
+    sqlite3_open("tareas.db", &db);
+    
+    // Usamos '?' para evitar ataques de inyección SQL (buenas prácticas)
+    char *sql = "INSERT INTO tareas (descripcion) VALUES (?);";
+    
+    sqlite3_prepare_v2(db, sql, -1, &res, 0);
+    sqlite3_bind_text(res, 1, nueva_descripcion, -1, SQLITE_STATIC);
+    
+    sqlite3_step(res);
+    sqlite3_finalize(res);
+    sqlite3_close(db);
 
-    fprintf(archivo, "0,%s\n", nueva_descripcion);
-    fclose(archivo);
-
-    printf("¡Tarea añadida con éxito!\n");
+    printf("¡Tarea guardada en la base de datos!\n");
 }
 
-// NUEVA FUNCIÓN: Modificar una tarea existente
+// Función para completar una tarea usando UPDATE
 void completar_tarea() {
-    Tarea lista[MAX_TAREAS];
-    int total_tareas = 0;
+    sqlite3 *db;
+    sqlite3_stmt *res;
+    int id_tarea;
 
-    // 1. LEER EL ARCHIVO COMPLETO A LA RAM
-    FILE *archivo_lectura = fopen("tareas.txt", "r");
-    if (archivo_lectura == NULL) {
-        printf("No hay tareas para completar.\n");
-        return;
-    }
-
-    while (fscanf(archivo_lectura, "%d,%[^\n]\n", &lista[total_tareas].completada, lista[total_tareas].descripcion) != EOF) {
-        total_tareas++;
-        if (total_tareas >= MAX_TAREAS) break;
-    }
-    fclose(archivo_lectura);
-
-    if (total_tareas == 0) {
-        printf("La lista está vacía.\n");
-        return;
-    }
-
-    // Mostrar las tareas para que el usuario elija
     mostrar_tareas();
-    int numero_tarea;
-    printf("\nIntroduce el número de la tarea que has completado: ");
-    scanf("%d", &numero_tarea);
+    printf("\nIntroduce el ID [número entre corchetes] de la tarea completada: ");
+    scanf("%d", &id_tarea);
 
-    // Validar que el número sea correcto
-    if (numero_tarea < 1 || numero_tarea > total_tareas) {
-        printf("Número de tarea no válido.\n");
-        return;
-    }
+    sqlite3_open("tareas.db", &db);
+    
+    char *sql = "UPDATE tareas SET completada = 1 WHERE id = ?;";
+    
+    sqlite3_prepare_v2(db, sql, -1, &res, 0);
+    sqlite3_bind_int(res, 1, id_tarea);
+    
+    sqlite3_step(res);
+    sqlite3_finalize(res);
+    sqlite3_close(db);
 
-    // 2. MODIFICAR EL DATO EN LA MEMORIA (Restamos 1 porque los arrays empiezan en 0)
-    lista[numero_tarea - 1].completada = 1;
-
-    // 3. SOBRESCRIBIR EL ARCHIVO CON LOS NUEVOS DATOS (Modo "w" de write)
-    FILE *archivo_escritura = fopen("tareas.txt", "w");
-    if (archivo_escritura == NULL) {
-        printf("Error al actualizar el archivo.\n");
-        return;
-    }
-
-    for (int i = 0; i < total_tareas; i++) {
-        fprintf(archivo_escritura, "%d,%s\n", lista[i].completada, lista[i].descripcion);
-    }
-    fclose(archivo_escritura);
-
-    printf("¡Tarea marcada como completada!\n");
+    printf("¡Base de datos actualizada!\n");
 }
 
 int main() {
     int opcion;
+    
+    // Inicializamos la base de datos antes de mostrar el menú
+    inicializar_db();
 
     do {
-        printf("\n--- GESTOR DE TAREAS ---\n");
+        printf("\n--- GESTOR DE TAREAS (EDICIÓN SQLITE) ---\n");
         printf("1. Ver tareas\n");
         printf("2. Añadir tarea\n");
-        printf("3. Completar tarea\n"); // Nueva opción
+        printf("3. Completar tarea\n");
         printf("4. Salir\n");
         printf("Elige una opción: ");
         scanf("%d", &opcion);
 
         switch (opcion) {
-            case 1:
-                mostrar_tareas();
-                break;
-            case 2:
-                añadir_tarea();
-                break;
-            case 3:
-                completar_tarea();
-                break;
-            case 4:
-                printf("¡Pasa un buen verano!\n");
-                break;
-            default:
-                printf("Opción no válida.\n");
+            case 1: mostrar_tareas(); break;
+            case 2: añadir_tarea(); break;
+            case 3: completar_tarea(); break;
+            case 4: printf("¡Hasta luego!\n"); break;
+            default: printf("Opción no válida.\n");
         }
     } while (opcion != 4);
 

@@ -7,8 +7,8 @@ TARGET = gestor
 all: $(TARGET)
 
 $(TARGET): main.c
-	$(CC) $(CFLAGS) main.c -o $(TARGET)
+	$(CC) $(CFLAGS) main.c -o $(TARGET) -lsqlite3
 
 # Regla para limpiar los archivos compilados y empezar desde cero
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) tareas.db
